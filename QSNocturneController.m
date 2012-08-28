@@ -8,6 +8,13 @@ void CGDisplayForceToGray();
 void CGDisplaySetInvertedPolarity();
 void CGSSetDebugOptions(int);
 
+@interface QSNocturneController(MenuCovers)
+    //private functions that should be declared to remove warnings
+    - (void)modeDidChange:(int)mode;
+    - (void)updateFrames;
+
+@end
+
 @interface NSStatusItem (QSNSStatusItemPrivate)
 - (NSWindow *)_window;
 @end
@@ -24,13 +31,13 @@ void CGSSetDebugOptions(int);
   cid = _CGSDefaultConnection();
   int tags[2] = { 0, 0 };
   
-  if (!CGSGetWindowTags(cid, wid, tags, 32)) {
+  if (!CGSGetWindowTags(cid, wid, (CGSWindowTag *)tags, 32)) {
     if (flag) {
       tags[0] = tags[0] | 0x00000800;
     } else {
       tags[0] = tags[0] & ~0x00000800;
     }
-    CGSSetWindowTags(cid, wid, tags, 32);
+    CGSSetWindowTags(cid, wid, (CGSWindowTag *)tags, 32);
   }
 }
 
@@ -43,9 +50,13 @@ void CGSSetDebugOptions(int);
   [[NSUserDefaults standardUserDefaults] registerDefaults:[[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSUserDefaults"]];
   
   [NSColorPanel setPickerMode:NSHSBModeColorPanel];
-  [self setKeys:[NSArray arrayWithObject:@"enabled"] triggerChangeNotificationsForDependentKey:@"toggleTitle"];
-  [self setKeys:[NSArray arrayWithObject:@"enabled"] triggerChangeNotificationsForDependentKey:@"toggleImage"];
-  [self setKeys:[NSArray arrayWithObject:@"useLightSensors"] triggerChangeNotificationsForDependentKey:@"lightMonitor"];
+  //[self setKeys:[NSArray arrayWithObject:@"enabled"] triggerChangeNotificationsForDependentKey:@"toggleTitle"];
+  //[self setKeys:[NSArray arrayWithObject:@"enabled"] triggerChangeNotificationsForDependentKey:@"toggleImage"];
+  //[self setKeys:[NSArray arrayWithObject:@"useLightSensors"] triggerChangeNotificationsForDependentKey:@"lightMonitor"];
+  
+  [self keyPathsForValuesAffectingValueForKey:@"toggleTitle"];
+  [self keyPathsForValuesAffectingValueForKey:@"toggleImage"];
+  [self keyPathsForValuesAffectingValueForKey:@"lightMonitor"];
 }
 
 
@@ -77,7 +88,7 @@ void CGSSetDebugOptions(int);
   
  // printf("spec.type = %d\n", spec.type);
   
-  int transHandle;
+  //int transHandle;
   //CGSNewTransition(_CGSDefaultConnection, &spec, &transHandle);
   [prefsWindow display];
   //CGSInvokeTransition(_CGSDefaultConnection, transHandle, 1.0);
@@ -85,7 +96,7 @@ void CGSSetDebugOptions(int);
 
 
 - (void)applicationWillFinishLaunching:(NSNotification *)notification {
-  CGTableCount sampleCount;
+  uint32_t sampleCount;
   CGGetDisplayTransferByTable( 0, 256, gOriginalRedTable, gOriginalGreenTable, gOriginalBlueTable, &sampleCount);
   
   originalBrightness = [self getDisplayBrightness];
@@ -598,7 +609,8 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
                              sizeof(UInt32),
                              /*outActualSize*/ NULL,
                              &mode);
-    [controller modeDidChange:mode];
+  
+    [(id)controller modeDidChange:mode];
     status = noErr;	 // everything went well, event handled
   }
   return status;
@@ -628,8 +640,8 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
     correctHue = [[object valueForKeyPath:keyPath] boolValue];
     [self updateFrames];
   } else if ([keyPath isEqualToString:@"values.showMenu"]) {
-    BOOL visible = [[object valueForKeyPath:keyPath] boolValue];
-    if (visible) {
+    BOOL Visible = [[object valueForKeyPath:keyPath] boolValue];
+    if (Visible) {
       statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:22];
       [statusItem setMenu:statusMenu];
       [statusItem setHighlightMode:YES];

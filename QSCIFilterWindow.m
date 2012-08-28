@@ -9,6 +9,16 @@
 #import "QSCIFilterWindow.h"
 CGSConnection cid;
 
+@interface QSCIFilterWindow()
+    //these are private unpublished functions in the Cocoa framework
+    //defining these here simply removes warnings... we don't reimplement them
+    void CGSRemoveWindowFilter(CGSConnection, CGSWindow, void*);
+    void CGSReleaseCIFilter(CGSConnection, void*);
+    CGError CGSNewCIFilterByName(CGSConnection, CFStringRef, void*);
+    CGError CGSAddWindowFilter(CGSConnection, CGSWindow, void*, int);
+    void CGSSetCIFilterValuesFromDictionary(CGSConnection, void*, CFDictionaryRef);
+@end
+
 void DXSetWindowTag(int wid, CGSWindowTag tag,int state){	
   CGSConnection cid;
   

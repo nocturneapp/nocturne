@@ -11,7 +11,10 @@
 
 @implementation QSLMUMonitor
 + (void)initialize {
-  [self setKeys:[NSArray arrayWithObject:@"monitorSensors"] triggerChangeNotificationsForDependentKey:@"fuzzyAverage"];
+  //[self setKeys:[NSArray arrayWithObject:@"monitorSensors"] triggerChangeNotificationsForDependentKey:@"fuzzyAverage"];
+    
+    [self keyPathsForValuesAffectingValueForKey:@"fuzzyAverage"];
+
 }
 - (int)average {
   return (left + right) / 2 ;
@@ -28,8 +31,9 @@
 }
 
 - (void)checkValues:(NSTimer *)timer {
-  IOItemCount   scalarInputCount = 0;
-  IOItemCount   scalarOutputCount = 2;
+  //IOItemCount   scalarInputCount = 0;
+  //IOItemCount   scalarOutputCount = 2;
+    
   /*
   SInt32 newLeft;
   SInt32 newRight;
