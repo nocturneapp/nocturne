@@ -9,10 +9,7 @@
 #import <Cocoa/Cocoa.h>
 #import "CGSPrivate.h"
 
-@interface QSCIFilterWindow : NSWindow {
-	CGSWindow wid;
-	void * fid;
-}
+@interface QSCIFilterWindow : NSWindow
 - (void)setFilter:(NSString *)filter;
 - (void)setFilterValues:(NSDictionary *)filterValues;
 //- (void)setLevel:(int)level;

@@ -9,17 +9,8 @@
 #import "QSCIFilterWindow.h"
 CGSConnection cid;
 
-@interface QSCIFilterWindow()
-    //these are private unpublished functions in the Cocoa framework
-    //defining these here simply removes warnings... we don't reimplement them
-    void CGSRemoveWindowFilter(CGSConnection, CGSWindow, void*);
-    void CGSReleaseCIFilter(CGSConnection, void*);
-    CGError CGSNewCIFilterByName(CGSConnection, CFStringRef, void*);
-    CGError CGSAddWindowFilter(CGSConnection, CGSWindow, void*, int);
-    void CGSSetCIFilterValuesFromDictionary(CGSConnection, void*, CFDictionaryRef);
-@end
-
-void DXSetWindowTag(int wid, CGSWindowTag tag,int state){	
+void DXSetWindowTag(int wid, CGSWindowTag tag,int state);
+void DXSetWindowTag(int wid, CGSWindowTag tag,int state){
   CGSConnection cid;
   
   cid = _CGSDefaultConnection();
@@ -35,11 +26,13 @@ void DXSetWindowTag(int wid, CGSWindowTag tag,int state){
   }
 }
 
-void DXSetWindowIgnoresMouse(int wid, int state){	
+void DXSetWindowIgnoresMouse(int wid, int state);
+void DXSetWindowIgnoresMouse(int wid, int state){
   DXSetWindowTag(wid,CGSTagTransparent,state);
 }
 
 #define NSRectToCGRect(r) CGRectMake(r.origin.x, r.origin.y, r.size.width, r.size.height)
+CGRect QSCGRectFromScreenFrame(NSRect rect);
 CGRect QSCGRectFromScreenFrame(NSRect rect){
   CGRect screenBounds = CGDisplayBounds(kCGDirectMainDisplay);
   CGRect cgrect=NSRectToCGRect(rect);
@@ -51,7 +44,11 @@ CGRect QSCGRectFromScreenFrame(NSRect rect){
 
 CGSConnection cid;
 
-@implementation QSCIFilterWindow
+@implementation QSCIFilterWindow {
+    CGSWindow wid;
+    void * fid;
+}
+
 + (void)initialize {
   cid=_CGSDefaultConnection();
 }
@@ -68,14 +65,13 @@ CGSConnection cid;
     [self setLevel:CGWindowLevelForKey(kCGCursorWindowLevelKey)];
     [self setOpaque: NO];
     [self setBackgroundColor:[NSColor colorWithDeviceWhite:0.0 alpha:0.0]];
-    wid = [self windowNumber];
+    wid = (CGSWindow)[self windowNumber];
   }
   return self;
 }
 
 - (void) dealloc {
   [self setFilter:nil];
-  [super dealloc];
 }
 
 - (void)setFilter:(NSString *)filterName{
@@ -84,7 +80,7 @@ CGSConnection cid;
     CGSReleaseCIFilter(cid,fid);
   }
   if (filterName){
-    CGError error = CGSNewCIFilterByName(cid, (CFStringRef) filterName, &fid);
+    CGError error = CGSNewCIFilterByName(cid, (__bridge CFStringRef) filterName, &fid);
     if ( noErr == error ) {
       error = CGSAddWindowFilter(cid,wid,fid, 0x00003001);
       if (error) NSLog(@"addfilter err %d",error);
@@ -95,6 +91,6 @@ CGSConnection cid;
 
 -(void)setFilterValues:(NSDictionary *)filterValues{
   if (!fid) return;
-  CGSSetCIFilterValuesFromDictionary(cid, fid, (CFDictionaryRef)filterValues);
+  CGSSetCIFilterValuesFromDictionary(cid, fid, (__bridge CFDictionaryRef)filterValues);
 }
 @end

@@ -2,70 +2,36 @@
 //  QSLMUMonitor.h
 //  Nocturne
 //
-//  Created by Nicholas Jitkoff on 5/14/07.
-//  Copyright 2007 Blacktree. All rights reserved.
-//
-// lmucommon.h
+//  Created by Dominik Pich 11/2013
+/**
+ * based loosly on code:
+ * Created by Nicholas Jitkoff on 5/14/07.
+ * Copyright 2007 Blacktree. All rights reserved.
+ */
+#include <Foundation/Foundation.h>
 
+@class QSLMUMonitor;
 
+@protocol QSLMUMonitorDelegate <NSObject>
+- (void)monitor:(QSLMUMonitor *)monitor passedLowerBound:(uint64_t)lowerBound withValue:(uint64_t)value;
+- (void)monitor:(QSLMUMonitor *)monitor passedUpperBound:(uint64_t)upperBound withValue:(uint64_t)value;
+@end
 
-#import <Cocoa/Cocoa.h>
-#include <mach/mach.h>
-#include <IOKit/IOKitLib.h>
-#include <CoreFoundation/CoreFoundation.h>
+@interface QSLMUMonitor : NSObject
 
+@property(nonatomic, weak) id<QSLMUMonitorDelegate> delegate;
+//@property(nonatomic, assign) BOOL doKVO; //defaults to NO
 
-#ifndef LMUCOMMON_H
-#define LMUCOMMON_H
+//kvo
+@property(nonatomic, readonly) NSNumber *percent;
 
-enum {
-  kGetSensorReadingID   = 0,  // getSensorReading(int *, int *)
-  kGetLEDBrightnessID   = 1,  // getLEDBrightness(int, int *)
-  kSetLEDBrightnessID   = 2,  // setLEDBrightness(int, int, int *)
-  kSetLEDFadeID         = 3,  // setLEDFade(int, int, int, int *)
-  
-  // other firmware-related functions
-  // verifyFirmwareID     = 4,  // verifyFirmware(int *)
-  // getFirmwareVersionID = 5,  // getFirmwareVersion(int *)
-  
-  // other flashing-related functions
-  // ...
-};
+@property(nonatomic, assign) uint64_t lowerBound;
+@property(nonatomic, assign) uint64_t upperBound;
+@property(nonatomic, assign) BOOL monitorSensors;
 
-#endif
-
-
-@interface QSLMUMonitor : NSObject {
-  NSTimer *checkTimer;
-  io_connect_t dataPort;
-  
-  
-  SInt32 left;
-  SInt32 right;
-  
-  id delegate;
-  SInt32 lowerBound;
-  SInt32 upperBound;
-  BOOL sendNotifications;
-}
-
-- (id)delegate;
-- (void)setDelegate:(id)value;
-
-- (SInt32)lowerBound;
-- (void)setLowerBound:(SInt32)value;
-
-- (SInt32)upperBound;
-- (void)setUpperBound:(SInt32)value;
-
-- (void) setMonitorSensors:(BOOL)flag;
+///set to 0 for default interval (a few seconds)
+@property(nonatomic, assign) NSTimeInterval pollFrequency;
 
 + (BOOL)hasSensors;
 
 @end
-
-@interface NSObject (QSLMUMonitorDelegate)
-
-- (void)monitor:(QSLMUMonitor *)monitor passedLowerBound:(SInt32)lowerBound withValue:(SInt32)value;
-- (void)monitor:(QSLMUMonitor *)monitor passedUpperBound:(SInt32)upperBound withValue:(SInt32)value;
-@end 

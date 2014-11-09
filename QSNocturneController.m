@@ -1,122 +1,105 @@
 #import "QSNocturneController.h"
-#include <stdio.h>
-#include <IOKit/graphics/IOGraphicsLib.h>
-#include <ApplicationServices/ApplicationServices.h>
 #import "CGSPrivate.h"
+#import "QSCIFilterWindow.h"
+#import "NSWindow+Sticky.h"
+#import "PTHotKeyLib.h"
+#import "SRCommon.h"
+#import "NSStatusItem+Window.h"
 
-void CGDisplayForceToGray();
-void CGDisplaySetInvertedPolarity();
-void CGSSetDebugOptions(int);
+#import <stdio.h>
+#import <IOKit/graphics/IOGraphicsLib.h>
+#import <ApplicationServices/ApplicationServices.h>
 
-@interface QSNocturneController(MenuCovers)
-    //private functions that should be declared to remove warnings
-    - (void)modeDidChange:(int)mode;
-    - (void)updateFrames;
+//default keys
+#define GlobalHotkeyName @"hotkey"
+#define GlobalHotkeyKeyPath @"values.hotkey"
+#define AppleInterfaceStyleName @"AppleInterfaceStyle"
+#define AppleInterfaceStyleKeyPath @"values.AppleInterfaceStyle"
 
-@end
+@implementation QSNocturneController {
+  CGGammaValue gOriginalRedTable[ 256 ];
+  CGGammaValue gOriginalGreenTable[ 256 ];
+  CGGammaValue gOriginalBlueTable[ 256 ];
+  NSMutableArray *desktopWindows;
+  NSMutableArray *overlayWindows;
+  IBOutlet NSWindow *prefsWindow;
+  IBOutlet NSMenu *statusMenu;
+  BOOL shouldQuit;
 
-@interface NSStatusItem (QSNSStatusItemPrivate)
-- (NSWindow *)_window;
-@end
+  BOOL enabled;
 
-@implementation NSWindow (sticky)
+  NSColor *whiteColor;
+  NSColor *blackColor;
+  NSStatusItem *statusItem;
+  float originalBrightness;
+  QSLMUMonitor *monitor;
 
 
-- (void) setSticky:(BOOL)flag {
-  CGSConnection cid;
-  CGWindowID wid;
-  
-  wid = [self windowNumber];
-
-  cid = _CGSDefaultConnection();
-  int tags[2] = { 0, 0 };
-  
-  if (!CGSGetWindowTags(cid, wid, (CGSWindowTag *)tags, 32)) {
-    if (flag) {
-      tags[0] = tags[0] | 0x00000800;
-    } else {
-      tags[0] = tags[0] & ~0x00000800;
-    }
-    CGSSetWindowTags(cid, wid, (CGSWindowTag *)tags, 32);
-  }
+  NSWindow *menuWindow;
+  QSCIFilterWindow *menuHueOverlay;
+  QSCIFilterWindow *menuInvertOverlay;
+  NSArray *windows;
+  BOOL trackingMenu;
+  BOOL visible;
+  BOOL shouldHide;
+  BOOL correctHue;
+  BOOL dimMenu;
 }
 
-@end
-
-@implementation QSNocturneController 
-@synthesize dimMenu, invertMenuAlways;
-
+//setup settings
 + (void)initialize {
-  [[NSUserDefaults standardUserDefaults] registerDefaults:[[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSUserDefaults"]];
-  
+  id defaults = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSUserDefaults"];
+  [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
   [NSColorPanel setPickerMode:NSHSBModeColorPanel];
-  //[self setKeys:[NSArray arrayWithObject:@"enabled"] triggerChangeNotificationsForDependentKey:@"toggleTitle"];
-  //[self setKeys:[NSArray arrayWithObject:@"enabled"] triggerChangeNotificationsForDependentKey:@"toggleImage"];
-  //[self setKeys:[NSArray arrayWithObject:@"useLightSensors"] triggerChangeNotificationsForDependentKey:@"lightMonitor"];
-  
-  [self keyPathsForValuesAffectingValueForKey:@"toggleTitle"];
-  [self keyPathsForValuesAffectingValueForKey:@"toggleImage"];
-  [self keyPathsForValuesAffectingValueForKey:@"lightMonitor"];
 }
 
+//kvo dependencies
++ (NSSet *)keyPathsForValuesAffectingValueForKey:(NSString *)key {
+  if([key isEqualToString:@"enabled"]) {
+    return [NSSet setWithObjects:@"toggleButtonTitle", @"toggleButtonImage", nil];
+  }
+  else if([key isEqualToString:@"toggleButtonTitle"]) {
+    return [NSSet setWithObject:@"enabled"];
+  }
+  else if([key isEqualToString:@"toggleButtonImage"]) {
+    return [NSSet setWithObject:@"enabled"];
+  }
+  else if([key isEqualToString:@"useLightSensors"]) {
+    return [NSSet setWithObject:@"lightMonitor"];
+  }
+  else if([key isEqualToString:@"lightMonitor"]) {
+    return [NSSet setWithObject:@"useLightSensors"];
+  }
+  return nil;
+}
 
-- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag{
-  //[self toggle:nil];
-  [self showPreferences:sender];
-  //[sender hide:sender];
+#pragma mark - NSApplicationDelegate
+
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
+  [self toggleMode:nil];
+  [sender hide:sender];
   return NO;
 }
-- (NSString *)toggleTitle {
-  return enabled ? @"Switch to Day" : @"Switch to Night";  
-}
-- (NSImage *)toggleImage {
-  return enabled ? [NSImage imageNamed:@"Sun"] : [NSImage imageNamed:@"Moon"];  
-}
-- (IBAction)showPreferences:(id)sender {
-  [NSApp activateIgnoringOtherApps:YES];
-  [prefsWindow makeKeyAndOrderFront:self];
-  
-//  CGSTransitionSpec spec;
-//  //   spec.unknown1 = 0;
-//  //spec.type = (CGSTransitionType) (CGSFlip );
-//  //spec.type = (CGSTransitionType) (CGSFlip | (1<<7));
-//  spec.type = (CGSTransitionType) 135;
-//  spec.option = CGSLeft;
-//  spec.wid = [prefsWindow windowNumber];
-//  spec.backColour = NULL;
-  
-  
- // printf("spec.type = %d\n", spec.type);
-  
-  //int transHandle;
-  //CGSNewTransition(_CGSDefaultConnection, &spec, &transHandle);
-  [prefsWindow display];
-  //CGSInvokeTransition(_CGSDefaultConnection, transHandle, 1.0);
-}
-
 
 - (void)applicationWillFinishLaunching:(NSNotification *)notification {
+  //before we change anything
   uint32_t sampleCount;
   CGGetDisplayTransferByTable( 0, 256, gOriginalRedTable, gOriginalGreenTable, gOriginalBlueTable, &sampleCount);
-  
   originalBrightness = [self getDisplayBrightness];
   
+  //add menubar icon
   BOOL uiElement = [[[NSBundle mainBundle] objectForInfoDictionaryKey:@"LSUIElement"] boolValue];
-  BOOL menuEnabled = [[[NSUserDefaults standardUserDefaults] objectForKey:@"showMenu"] boolValue];
-  
-  if (uiElement && menuEnabled) {
+  if (uiElement) {
     statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:22];
     [statusItem setMenu:statusMenu];
     [statusItem setHighlightMode:YES];
-    [statusItem setImage:[NSImage imageNamed:@"NocturneMenu"]];
-    [statusItem setAlternateImage:[NSImage imageNamed:@"NocturneMenuPressed"]];
-    [statusItem retain];
+    [self applyMenubarIcon];
+
+    //observe defaults for dark mode
+    [[NSUserDefaultsController sharedUserDefaultsController] addObserver:self forKeyPath:AppleInterfaceStyleKeyPath options:0 context: NULL];
   }
-  
-  NSRect screenFrame = [[NSScreen mainScreen] visibleFrame];
-  NSRect windowFrame = [prefsWindow frame];
-  windowFrame = NSOffsetRect(windowFrame, NSMaxX(screenFrame) - NSMaxX(windowFrame) - 20, NSMaxY(screenFrame) - NSMaxY(windowFrame) - 20);
-  [prefsWindow setFrame:windowFrame display:YES animate:YES ];
+
+  //prepare our arrays for the overlay windows
   if (overlayWindows == NULL) {
     overlayWindows = [[NSMutableArray alloc] init];
   }
@@ -128,19 +111,24 @@ void CGSSetDebugOptions(int);
 - (void)applicationDidChangeScreenParameters:(NSNotification *)aNotification{
   if (!enabled) return;
   
-	if ([overlayWindows count] != 0) {
-		[self setupOverlays];
-	}
-	[self updateGamma];
-	if ([desktopWindows count] != 0) {
-		[self setDesktopHidden:YES];
-	}
+  if ([overlayWindows count] != 0) {
+    [self setupOverlays];
+  }
+  [self updateGamma];
+  if ([desktopWindows count] != 0) {
+    [self setDesktopHidden:YES];
+  }
 }
 
-
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+  //apply hotkey
+  [self applyHotkey];
   
-  NSNumber *enabledValue = [[NSUserDefaults standardUserDefaults] objectForKey:@"enabled"];  
+  //observe defaults for hotkey
+  [[NSUserDefaultsController sharedUserDefaultsController]
+   addObserver:self forKeyPath:GlobalHotkeyKeyPath options:0 context: NULL];
+  
+  NSNumber *enabledValue = [[NSUserDefaults standardUserDefaults] objectForKey:@"enabled"];
   [self setEnabled: [enabledValue boolValue]];
   
   NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -149,15 +137,53 @@ void CGSSetDebugOptions(int);
     [self showPreferences:self];
     [defaults setValue:[NSDate date] forKey:@"lastLaunchDate"];
   }
-  
-  
 }
+
+- (void)applicationWillTerminate:(NSNotification *)notification{
+  [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:@"enabled"];
+  shouldQuit = YES;
+  [self setEnabled:NO];
+}
+
+#pragma mark - IBActions
+
+- (IBAction)showPreferences:(id)sender {
+  //position the prefs
+  NSRect screenFrame = [[NSScreen mainScreen] visibleFrame];
+  NSRect windowFrame = [prefsWindow frame];
+  windowFrame = NSOffsetRect(windowFrame, NSMaxX(screenFrame) - NSMaxX(windowFrame) - 20, NSMaxY(screenFrame) - NSMaxY(windowFrame) - 20);
+  [prefsWindow setFrame:windowFrame display:YES animate:YES ];
+  
+  //show the window
+  [NSApp activateIgnoringOtherApps:YES];
+  [prefsWindow makeKeyAndOrderFront:self];
+  [prefsWindow display];
+}
+
+- (IBAction)toggleMode:(id)sender {
+  [self performSelector:@selector(toggle) withObject:nil afterDelay:0.0];
+}
+
+- (IBAction)changeHotkey:(id)sender {
+  id hotkey = [[PTHotKeyCenter sharedCenter] hotKeyForName:GlobalHotkeyName];
+  [[PTKeyComboPanel sharedPanel] showSheetForHotkey:hotkey forWindow:prefsWindow modalDelegate:self];
+}
+
+- (IBAction)resetTint:(id)sender {
+  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"whiteColor"];
+  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"blackColor"];
+}
+
+#pragma mark - Bindings
+
 - (BOOL)canUseSensors {
   return [QSLMUMonitor hasSensors];
 }
+
 - (BOOL)useLightSensors {
   return monitor != nil; 
 }
+
 - (void)setUseLightSensors:(BOOL)value {
   if (value) {
     if (!monitor) {
@@ -174,7 +200,6 @@ void CGSSetDebugOptions(int);
     [monitor unbind:@"upperBound"];
     
     [monitor setMonitorSensors:NO];
-    [monitor release];
     monitor = nil;
   }
 }
@@ -183,36 +208,12 @@ void CGSSetDebugOptions(int);
   return monitor;
 }
 
-- (void)monitor:(QSLMUMonitor *)monitor passedLowerBound:(SInt32)lowerBound withValue:(SInt32)value {
-  [self setEnabled:YES];  
-}
-
-- (void)monitor:(QSLMUMonitor *)monitor passedUpperBound:(SInt32)upperBound withValue:(SInt32)value {
-  [self setEnabled:NO];  
-}
-
-
-
-
-
 - (id)valueForUndefinedKey:(NSString *)key{
   return nil;
 }
 - (void)toggle {
   [self setEnabled:![self enabled]];
 }
-- (IBAction)toggle:(id)sender {
-  [self performSelector:@selector(toggle) withObject:nil afterDelay:0.0];
-}
-
-
-
-- (void)applicationWillTerminate:(NSNotification *)notification{
-  [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:@"enabled"];
-  shouldQuit = YES;
-  [self setEnabled:NO];
-}
-
 
 - (void)setDesktopHidden:(BOOL)hidden {
   NSWindow *desktopWindow;
@@ -234,7 +235,6 @@ void CGSSetDebugOptions(int);
       [desktopWindow setSticky:YES];
       [desktopWindow setCollectionBehavior:1 | 16];
       [desktopWindows addObject:desktopWindow];
-      [desktopWindow release];
     }
   }
 }
@@ -291,10 +291,6 @@ void CGSSetDebugOptions(int);
   [self setBrightness:brightness];
 }
 
-- (IBAction)revertGamma:(id)sender {
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"whiteColor"];
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"blackColor"];
-}
 - (void)restoreGamma {
   CGDisplayRestoreColorSyncSettings(); 
 }
@@ -392,7 +388,6 @@ void CGSSetDebugOptions(int);
 - (void)removeOverlays{
 	while([overlayWindows count] > 0) {
 		QSCIFilterWindow *overlayWindow = [overlayWindows lastObject];
-		[overlayWindow release];
 		[overlayWindows removeLastObject];
 		overlayWindow = nil;
 	}
@@ -407,15 +402,7 @@ void CGSSetDebugOptions(int);
 			[overlayWindow setFilter:@"CIHueAdjust"];
 			[overlayWindow setFilterValues:[NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithFloat:M_PI], @"inputAngle",nil]];
 			[overlayWindow orderFront:nil];
-      
-      //OSX 10.4 compatible code that puts the overlays on all spaces
-      // replacement for the line commented out below
-      if ([overlayWindow respondsToSelector:@selector(setCollectionBehavior:)]) {
-        [overlayWindow setCollectionBehavior:1 | 16];
-      }
-      //This line is OSX 10.5 specific.
-      //[overlayWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces];
-			
+      [overlayWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces];
 			[overlayWindows addObject:overlayWindow];
 		} else {
 			overlayWindow = [overlayWindows objectAtIndex:i];
@@ -424,14 +411,12 @@ void CGSSetDebugOptions(int);
 	}
 	while ([overlayWindows count] > [[NSScreen screens] count]) {
 		QSCIFilterWindow *overlayWindow = [overlayWindows lastObject];
-		[overlayWindow release];
 		[overlayWindows removeLastObject];
 		overlayWindow = nil;
 	}
 }	
 
 - (void)setHueCorrect:(BOOL)value{
-  // if (![[dController valueForKeyPath: @"values.inverted"] boolValue]) value = NO;
   [self setHueAngle: value ? M_PI : 0];
 }
 
@@ -490,7 +475,7 @@ void CGSSetDebugOptions(int);
     [self setMonochrome:NO];
     [self setShadowsHidden:NO];
     [self setDesktopHidden:NO];
-    [self setDisplayBrightness:MAX(0.005, originalBrightness)];
+    [self setDisplayBrightness:fmax(0.005, originalBrightness)];
   }
   
 
@@ -500,10 +485,10 @@ void CGSSetDebugOptions(int);
     [[NSStatusBar systemStatusBar] removeStatusItem:statusItem];
     statusItem = nil;
   }
-  [self willChangeValueForKey:@"toggleTitle"];
-  [self didChangeValueForKey:@"toggleTitle"];
-  [self willChangeValueForKey:@"toggleImage"];
-  [self didChangeValueForKey:@"toggleImage"];
+  [self willChangeValueForKey:@"toggleButtonTitle"];
+  [self didChangeValueForKey:@"toggleButtonTitle"];
+  [self willChangeValueForKey:@"toggleButtonImage"];
+  [self didChangeValueForKey:@"toggleButtonImage"];
   [prefsWindow display];
 }
 
@@ -538,29 +523,6 @@ void CGSSetDebugOptions(int);
   }
 }
 
-//CGDisplayFadeReservationToken token;
-//CGDisplayErr err;
-//
-//err = CGAcquireDisplayFadeReservation (2.0, &token); // 1
-//if (err == kCGErrorSuccess){
-//  err = CGDisplayFade (token, 0.5, kCGDisplayBlendNormal,
-//                       kCGDisplayBlendSolidColor, 1.0, 1.0, 1.0, true); // 2
-//                                                                        // Your code to change the display mode and
-//                                                                        // set the full-screen context.
-//  
-//  [self setEnabled:NO];
-//  
-//  [[NSApp windows] makeObjectsPerformSelector:@selector(orderOut:) withObject:nil];
-//  
-//  err = CGDisplayFade (token, 1.0, kCGDisplayBlendSolidColor,
-//                       kCGDisplayBlendNormal, 1.0, 1.0, 1.0, true); // 3
-//  err = CGReleaseDisplayFadeReservation (token); // 4
-//}
-
-
-
-
-
 - (void)setEnabled:(BOOL)value {
   if (enabled != value) {
     enabled = value;
@@ -569,34 +531,31 @@ void CGSSetDebugOptions(int);
 }
 
 - (NSColor *)whiteColor {
-  return [[whiteColor retain] autorelease];
+  return whiteColor;
 }
 
 - (void)setWhiteColor:(NSColor *)value {
   if (whiteColor != value) {
-    [whiteColor release];
     whiteColor = [value copy];
     [self updateGamma];
   }
 }
 
 - (NSColor *)blackColor {
-  return [[blackColor retain] autorelease];
+  return blackColor;
 }
 
 - (void)setBlackColor:(NSColor *)value {
   if (blackColor != value) {
-    [blackColor release];
     blackColor = [value copy];
     [self updateGamma];
     
   }
 }
 
-@end
+#pragma mark - QSNocturneController (MenuCovers)
 
-
-
+pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent, void* controller );
 pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent, void* controller ) {
   OSStatus status = eventNotHandledErr;
   
@@ -609,18 +568,13 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
                              sizeof(UInt32),
                              /*outActualSize*/ NULL,
                              &mode);
-  
-    [(id)controller modeDidChange:mode];
+    [(__bridge QSNocturneController*)controller modeDidChange:mode];
     status = noErr;	 // everything went well, event handled
   }
   return status;
 }
 
-@implementation QSNocturneController (MenuCovers)
-
 - (void)modeDidChange:(int)mode {
-  if (!invertMenuAlways) return;
-
   if (mode) {
     [menuWindow orderOut:nil];
     [menuHueOverlay orderOut:nil];
@@ -639,27 +593,45 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
   } else if ([keyPath isEqualToString:@"values.hueCorrect"]) {
     correctHue = [[object valueForKeyPath:keyPath] boolValue];
     [self updateFrames];
-  } else if ([keyPath isEqualToString:@"values.showMenu"]) {
-    BOOL Visible = [[object valueForKeyPath:keyPath] boolValue];
-    if (Visible) {
-      statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:22];
-      [statusItem setMenu:statusMenu];
-      [statusItem setHighlightMode:YES];
-      [statusItem setImage:[NSImage imageNamed:@"NocturneMenu"]];
-      [statusItem setAlternateImage:[NSImage imageNamed:@"NocturneMenuPressed"]];
-      [statusItem retain]; 
-    } else {
-      [[NSStatusBar systemStatusBar] removeStatusItem:statusItem];
-      [statusItem release];
-      statusItem = nil;
-    }
-  } else {
+  } else if([keyPath isEqualToString:GlobalHotkeyKeyPath]) {
+    [self applyHotkey];
+  } else if([keyPath isEqualToString:AppleInterfaceStyleKeyPath]) {
+    [self applyMenubarIcon];
+  }
+  else {
     [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
   }
 }
 
-- (void)awakeFromNib{
+- (void)windowDidEnterFullScreen:(NSNotification *)notification {
   
+  NSLog(@"blah");
+}
+
+- (NSArray *)customWindowsToEnterFullScreenForWindow:(NSWindow *)window {
+  NSLog(@"blah");
+  return nil;
+}
+
+
+- (void)workspaceChanged:(NSNotification *)notif {
+  int currentSpace;
+  // get an array of all the windows in the current Space
+  CFArrayRef windowsInSpace = CGWindowListCopyWindowInfo(kCGWindowListOptionAll | kCGWindowListOptionOnScreenOnly, kCGNullWindowID);      
+  
+  // now loop over the array looking for a window with the kCGWindowWorkspace key
+  for (NSMutableDictionary *thisWindow in (NSArray *)CFBridgingRelease(windowsInSpace))
+  {
+    if ([thisWindow objectForKey:(id)kCGWindowWorkspace])
+    {
+      currentSpace = [[thisWindow objectForKey:(id)kCGWindowWorkspace] intValue];
+      break;
+    }
+  }
+}
+
+- (void)awakeFromNib{
+  [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self selector:@selector(workspaceChanged:) name:NSWorkspaceActiveSpaceDidChangeNotification  object:nil];
   [prefsWindow setBackgroundColor:[NSColor whiteColor]];   
   [prefsWindow setLevel:NSFloatingWindowLevel];   
   [prefsWindow setHidesOnDeactivate:NO];   
@@ -668,29 +640,28 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
   
   NSUserDefaultsController *dController = [NSUserDefaultsController sharedUserDefaultsController];
   [self bind:@"dimMenu" toObject:dController withKeyPath:@"values.dimMenu" options:nil];
-  [self bind:@"invertMenuAlways" toObject:dController withKeyPath:@"values.invertMenuAlways" options:nil];
   [self bind:@"useLightSensors" toObject:dController withKeyPath:@"values.useLightSensors" options:nil];
   [dController addObserver:self forKeyPath:@"values.dimMenuOpacity" options:0 context:NULL];
   [dController addObserver:self forKeyPath:@"values.hueCorrect" options:0 context:NULL];
-  [dController addObserver:self forKeyPath:@"values.showMenu" options:0 context:NULL];
   
   NSRect rect = [[NSScreen mainScreen] frame];
   rect = NSMakeRect(0,NSMaxY(rect)-22,NSWidth(rect),22);
   
   menuWindow = [[NSWindow alloc]initWithContentRect:rect styleMask:NSBorderlessWindowMask backing:NSBackingStoreBuffered defer:NO];
-  [menuWindow setBackgroundColor: [NSColor blackColor]];
+  [menuWindow setBackgroundColor:(enabled ? [NSColor whiteColor] : [NSColor blackColor])];
   [menuWindow setOpaque:NO];
   [menuWindow setAlphaValue:0.9];
   [menuWindow setCanHide:NO];
   [menuWindow setAllowsToolTipsWhenApplicationIsInactive:YES];
   [menuWindow setIgnoresMouseEvents:YES];
   [menuWindow setHasShadow:NO];
+  [menuWindow setDelegate:self];
   [menuWindow setLevel:kCGStatusWindowLevel+2];
-  [menuWindow setCollectionBehavior:1 | 16];
-  [menuWindow setSticky:YES];
+  [menuWindow setCollectionBehavior: NSWindowCollectionBehaviorTransient | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
+//  [menuWindow setSticky:YES];
   //[window setDelegate:[window contentView]]];
-  NSTrackingArea *area = [[[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingInVisibleRect | NSTrackingEnabledDuringMouseDrag |NSTrackingActiveAlways
-                                                         owner:self userInfo:nil] autorelease];
+  NSTrackingArea *area = [[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingInVisibleRect | NSTrackingEnabledDuringMouseDrag |NSTrackingActiveAlways
+                                                         owner:self userInfo:nil];
   [[menuWindow contentView] addTrackingArea:area];
   
   [menuWindow setAlphaValue:0.0];
@@ -707,9 +678,9 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
   
   static const EventTypeSpec sAppEvents[] = { { kEventClassApplication, kEventAppSystemUIModeChanged } };
   
-  InstallApplicationEventHandler( NewEventHandlerUPP( AppEventHandler ),
+  InstallApplicationEventHandler( NewEventHandlerUPP( (void*)AppEventHandler ),
                                  GetEventTypeCount( sAppEvents ),
-                                 sAppEvents, self, NULL );
+                                 sAppEvents, (__bridge  void*)self, NULL );
 }
 
 - (void)endTracking {
@@ -744,7 +715,7 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
     [menuWindow orderOut:nil];
   }
   
-  if ([self enabled] || invertMenuAlways) {
+  if ([self enabled]) {
     [menuInvertOverlay orderFront:nil];
   } else {
     [menuInvertOverlay orderOut:nil];
@@ -762,22 +733,19 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
   [menuHueOverlay setLevel:kCGStatusWindowLevel+1];
   [menuHueOverlay setFilter:@"CIHueAdjust"];
   [menuHueOverlay setFilterValues:[NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithFloat:M_PI], @"inputAngle",nil]];  
-  //[menuHueOverlay setCollectionBehavior:1 | 16];
-  [menuHueOverlay setCollectionBehavior:NSWindowCollectionBehaviorIgnoresCycle | NSWindowCollectionBehaviorMoveToActiveSpace];
-  //[menuHueOverlay setSticky:YES];
+  [menuHueOverlay setCollectionBehavior:NSWindowCollectionBehaviorTransient | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
+  [menuHueOverlay setSticky:YES];
 
   menuInvertOverlay = [[QSCIFilterWindow alloc] init];
   [menuInvertOverlay setLevel:kCGStatusWindowLevel+1];
   [menuInvertOverlay setFilter:@"CIColorInvert"];
-  //[menuInvertOverlay setCollectionBehavior:1 | 16];
-  [menuInvertOverlay setCollectionBehavior:NSWindowCollectionBehaviorIgnoresCycle | NSWindowCollectionBehaviorMoveToActiveSpace];
-  //[menuInvertOverlay setCollectionBehavior:NSWindowCollectionBehaviorMoveToActiveSpace];
-  //[menuInvertOverlay setSticky:YES];
+  [menuInvertOverlay setCollectionBehavior:NSWindowCollectionBehaviorTransient | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
+  [menuInvertOverlay setSticky:YES];
 
   [[NSDistributedNotificationCenter defaultCenter] addObserver:self selector:@selector(endTracking) name:@"com.apple.HIToolbox.endMenuTrackingNotification" object:nil];
   [[NSDistributedNotificationCenter defaultCenter] addObserver:self selector:@selector(beginTracking) name:@"com.apple.HIToolbox.beginMenuTrackingNotification" object:nil];
   
-  windows = [[NSArray arrayWithObjects:menuWindow, menuHueOverlay, menuInvertOverlay, nil] retain]; 
+  windows = [NSArray arrayWithObjects:menuWindow, menuHueOverlay, menuInvertOverlay, nil]; 
   [self updateFrames];
 }
 
@@ -806,15 +774,84 @@ pascal OSStatus AppEventHandler( EventHandlerCallRef inCallRef, EventRef inEvent
   else shouldHide = YES;
 }
 
-- (void)setInvertMenuAlways:(BOOL)flag {
-  invertMenuAlways = flag;
-  [self updateFrames];
-
-}
-
 - (void)setDimMenu:(BOOL)flag {
   dimMenu = flag;
   [self updateFrames];
+}
+
+#pragma mark image & title for toggle button / menuitem
+
+- (NSString *)toggleButtonTitle {
+  NSString *title = enabled ? @"Switch to Day" : @"Switch to Night";
+
+  //get key combo
+  id plistTool = [[NSUserDefaults standardUserDefaults] objectForKey:GlobalHotkeyName];
+  PTKeyCombo *kc = [[PTKeyCombo alloc] initWithPlistRepresentation:plistTool];
+  if(kc) {
+    title = [title stringByAppendingFormat:@" (%@)", kc];
+  }
+  return title;
+}
+- (NSImage *)toggleButtonImage {
+  return enabled ? [NSImage imageNamed:@"Sun"] : [NSImage imageNamed:@"Moon"];
+}
+
+
+#pragma mark - menubar icon
+
+- (void)applyMenubarIcon {
+  NSString *osxMode = [[NSUserDefaults standardUserDefaults] stringForKey:AppleInterfaceStyleName];
+  if([osxMode isEqualToString:@"Dark"]) {
+    [statusItem setImage:[NSImage imageNamed:@"NocturneMenuPressed"]];
+    [statusItem setAlternateImage:[NSImage imageNamed:@"NocturneMenu"]];
+  }
+  else {
+    [statusItem setImage:[NSImage imageNamed:@"NocturneMenu"]];
+    [statusItem setAlternateImage:[NSImage imageNamed:@"NocturneMenuPressed"]];
+  }
+}
+
+#pragma mark - hotkey handling
+
+- (void)keyComboPanelEnded:(PTKeyComboPanel*)panel {
+  [[NSUserDefaults standardUserDefaults] setObject:[[panel keyCombo] plistRepresentation] forKey:GlobalHotkeyName];
+  [self willChangeValueForKey:@"toggleButtonTitle"];
+  [self didChangeValueForKey:@"toggleButtonTitle"];
+}
+
+- (void)applyHotkey {
+	//unregister old
+	for (PTHotKey *hotkey in [[PTHotKeyCenter sharedCenter] allHotKeys]) {
+		[[PTHotKeyCenter sharedCenter] unregisterHotKey:hotkey];
+	}
+  
+	//read plist
+	id plistTool = [[NSUserDefaults standardUserDefaults] objectForKey:GlobalHotkeyName];
+  
+  //get key combo
+  PTKeyCombo *kc = [[PTKeyCombo alloc] initWithPlistRepresentation:plistTool];
+  
+  //register it
+  PTHotKey *hotKey = [[PTHotKey alloc] init];
+  hotKey.name = GlobalHotkeyName;
+  hotKey.keyCombo = kc;
+  hotKey.target = self;
+  hotKey.action = @selector(hitHotKey:);
+  [[PTHotKeyCenter sharedCenter] registerHotKey:hotKey];
+}
+
+- (void)hitHotKey:(id)sender {
+  [self toggle];
+}
+
+#pragma mark - QSLMNUMonitorDelegate
+
+- (void)monitor:(QSLMUMonitor *)monitor passedLowerBound:(uint64_t)lowerBound withValue:(uint64_t)value {
+  [self setEnabled:YES];
+}
+
+- (void)monitor:(QSLMUMonitor *)monitor passedUpperBound:(uint64_t)upperBound withValue:(uint64_t)value {
+  [self setEnabled:NO];
 }
 
 @end

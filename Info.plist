@@ -8,6 +8,8 @@
 	<string>${EXECUTABLE_NAME}</string>
 	<key>CFBundleIconFile</key>
 	<string>Nocturne</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>CFBundleIdentifier</key>
 	<string>com.blacktree.Nocturne</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -19,11 +21,7 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>2.0.1</string>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.productivity</string>
-	<key>LSUIElement</key>
-	<true/>
+	<string>2.0.0</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
@@ -33,10 +31,7 @@
 		<key>adjustBrightness</key>
 		<false/>
 		<key>blackColor</key>
-		<data>
-		BAtzdHJlYW10eXBlZIHoA4QBQISEhAdOU0NvbG9yAISECE5TT2JqZWN0AIWE
-		AWMBhARmZmZmAAAAAYY=
-		</data>
+		<data>BAtzdHJlYW10eXBlZIHoA4QBQISEhAdOU0NvbG9yAISECE5TT2JqZWN0AIWEAWMBhARmZmZmAAAAAYY=</data>
 		<key>brightness</key>
 		<real>0.5</real>
 		<key>desktopHidden</key>
@@ -45,11 +40,16 @@
 		<string>1.0</string>
 		<key>dimMenuOpacity</key>
 		<string>0.0</string>
+		<key>hotkey</key>
+		<dict>
+			<key>keyCode</key>
+			<integer>49</integer>
+			<key>modifiers</key>
+			<integer>6400</integer>
+		</dict>
 		<key>enabled</key>
 		<false/>
 		<key>gammaEnabled</key>
-		<false/>
-		<key>hueCorrect</key>
 		<false/>
 		<key>inverted</key>
 		<true/>
@@ -59,8 +59,6 @@
 		<true/>
 		<key>shadowsHidden</key>
 		<false/>
-		<key>showMenu</key>
-		<true/>
 		<key>undimMenuDuration</key>
 		<string>0.25</string>
 		<key>undimMenuOpacity</key>
@@ -70,10 +68,7 @@
 		<key>useLightSensors</key>
 		<false/>
 		<key>whiteColor</key>
-		<data>
-		BAtzdHJlYW10eXBlZIHoA4QBQISEhAdOU0NvbG9yAISECE5TT2JqZWN0AIWE
-		AWMBhARmZmZmAQAAAYY=
-		</data>
+		<data>BAtzdHJlYW10eXBlZIHoA4QBQISEhAdOU0NvbG9yAISECE5TT2JqZWN0AIWEAWMBhARmZmZmAQAAAYY=</data>
 	</dict>
 </dict>
 </plist>
